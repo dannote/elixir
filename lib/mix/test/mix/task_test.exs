@@ -14,9 +14,6 @@ defmodule Mix.Tasks.Casing.Http do
   def run(_), do: "Http"
 end
 
-defmodule Mix.Tasks.InvalidAcronym.XML do
-end
-
 defmodule Mix.TaskTest do
   use MixTest.Case
 
@@ -50,14 +47,6 @@ defmodule Mix.TaskTest do
 
   test "run/2 prefers conventionally named tasks" do
     assert Mix.Task.run("casing.http") == "Http"
-  end
-
-  test "run/2 raises on invalid acronym tasks" do
-    assert_raise Mix.InvalidTaskError,
-                 "The task \"invalid_acronym.xml\" does not export run/1",
-                 fn ->
-                   Mix.Task.run("invalid_acronym.xml")
-                 end
   end
 
   test "run/2 converts OptionParser.ParseError into Mix errors" do

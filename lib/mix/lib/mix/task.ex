@@ -355,60 +355,13 @@ defmodule Mix.Task do
   end
 
   defp fetch(task) when is_binary(task) or is_atom(task) do
-    task = to_string(task)
-
-    case task_module(task) do
-      nil ->
-        {:error, :not_found}
-
-      module ->
+    case Mix.Utils.command_to_module(to_string(task), Mix.Tasks) do
+      {:module, module} ->
         if task?(module), do: {:ok, module}, else: {:error, :invalid}
+
+      {:error, _} ->
+        {:error, :not_found}
     end
-  end
-
-  defp task_module(task) do
-    expected = @task_prefix <> Mix.Utils.command_to_module_name(task)
-
-    case available_task_module(task, expected) do
-      nil -> nil
-      module -> String.to_atom(module)
-    end
-  end
-
-  defp available_task_module(task, expected) do
-    case find_available_task_module(available_modules(), task, expected) do
-      nil ->
-        :code.clear_cache()
-        find_available_task_module(available_modules(), task, expected)
-
-      module ->
-        module
-    end
-  end
-
-  defp available_modules do
-    for {module, _file, _loaded?} <- :code.all_available(),
-        module = List.to_string(module),
-        String.starts_with?(module, @task_prefix),
-        do: module
-  end
-
-  defp find_available_task_module(modules, task, expected) do
-    if expected in modules do
-      expected
-    else
-      case Enum.filter(modules, &(task_name_from_module(&1) == task)) do
-        [module] -> module
-        _ -> nil
-      end
-    end
-  end
-
-  defp task_name_from_module(module) do
-    module
-    |> String.replace_prefix(@task_prefix, "")
-    |> String.split(".")
-    |> Enum.map_join(".", &Macro.underscore/1)
   end
 
   @doc """
@@ -523,8 +476,94 @@ defmodule Mix.Task do
     # 2. Otherwise we compile and load dependencies
     # 3. Finally, we compile the current project in hope it is available.
     get_task_or_run(proj, task, fn -> run("deps.loadpaths") end) ||
-      get_task_or_run(proj, task, fn -> run("compile", []) end) ||
+      get_app_task(task) ||
+      run_and_get_task(proj, task, fn -> run("compile", []) end) ||
+      get_app_task(task) ||
       get(task)
+  end
+
+  defp run_and_get_task(nil, _task, _fun) do
+    nil
+  end
+
+  defp run_and_get_task(_proj, _task, fun) do
+    fun.()
+    nil
+  end
+
+  defp get_app_task(task) do
+    candidates =
+      for module <- app_modules(),
+          task?(module),
+          task_name(module) == task do
+        module
+      end
+
+    expected = Module.concat(Mix.Tasks, Mix.Utils.command_to_module_name(task))
+
+    cond do
+      expected in candidates -> expected
+      match?([_], candidates) -> hd(candidates)
+      true -> nil
+    end
+  end
+
+  defp app_modules do
+    Enum.uniq(
+      loaded_task_modules() ++ loaded_app_modules() ++ app_file_modules() ++ app_ebin_modules()
+    )
+  end
+
+  defp loaded_task_modules do
+    for {module, _file} <- :code.all_loaded(),
+        match?(~c"Elixir.Mix.Tasks." ++ _, Atom.to_charlist(module)) do
+      module
+    end
+  end
+
+  defp loaded_app_modules do
+    for {app, _description, _version} <- Application.loaded_applications(),
+        module <- Application.spec(app, :modules) || [] do
+      module
+    end
+  end
+
+  defp app_file_modules do
+    for {app, app_path} <- app_paths(),
+        {:ok, properties} <- [Mix.AppLoader.read_app(app, app_path)],
+        module <- properties[:modules] || [] do
+      module
+    end
+  end
+
+  defp app_ebin_modules do
+    for {_app, app_path} <- app_paths(),
+        file <- safe_list_dir(app_path |> Path.dirname() |> to_charlist()),
+        module = task_from_path(file),
+        module do
+      module
+    end
+  end
+
+  defp app_paths do
+    if Mix.Project.get() do
+      config = Mix.Project.config()
+      deps = Mix.Dep.cached() ++ Mix.Dep.Umbrella.cached()
+
+      current_app =
+        if config[:app] && not Mix.Project.umbrella?() do
+          [{config[:app], Path.join(Mix.Project.compile_path(config), "#{config[:app]}.app")}]
+        else
+          []
+        end
+
+      current_app ++
+        for %Mix.Dep{app: app, opts: opts} <- deps do
+          {app, Path.join([opts[:build], "ebin", "#{app}.app"])}
+        end
+    else
+      []
+    end
   end
 
   defp run_task(proj, module, task, args, apps) do
