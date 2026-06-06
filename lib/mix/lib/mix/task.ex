@@ -179,7 +179,8 @@ defmodule Mix.Task do
     end
   end
 
-  @prefix_size byte_size("Elixir.Mix.Tasks.")
+  @task_prefix "Elixir.Mix.Tasks."
+  @prefix_size byte_size(@task_prefix)
   @suffix_size byte_size(".beam")
 
   defp task_from_path(filename) do
@@ -366,11 +367,10 @@ defmodule Mix.Task do
   end
 
   defp task_module(task) do
-    expected = "Elixir.Mix.Tasks." <> Mix.Utils.command_to_module_name(task)
+    expected = @task_prefix <> Mix.Utils.command_to_module_name(task)
 
     case available_task_module(task, expected) do
       nil -> nil
-      ^expected -> String.to_atom(expected)
       module -> String.to_atom(module)
     end
   end
@@ -387,7 +387,10 @@ defmodule Mix.Task do
   end
 
   defp available_modules do
-    Enum.map(:code.all_available(), fn {module, _file, _loaded?} -> List.to_string(module) end)
+    for {module, _file, _loaded?} <- :code.all_available(),
+        module = List.to_string(module),
+        String.starts_with?(module, @task_prefix),
+        do: module
   end
 
   defp find_available_task_module(modules, task, expected) do
@@ -401,14 +404,11 @@ defmodule Mix.Task do
     end
   end
 
-  defp task_name_from_module("Elixir.Mix.Tasks." <> rest) do
-    rest
+  defp task_name_from_module(module) do
+    module
+    |> String.replace_prefix(@task_prefix, "")
     |> String.split(".")
     |> Enum.map_join(".", &Macro.underscore/1)
-  end
-
-  defp task_name_from_module(_module) do
-    nil
   end
 
   @doc """
